@@ -1,10 +1,10 @@
 {
-  "name": "securehive",
+  "name": "SecureHive",
   "version": "1.0.0",
   "main": "index.js",
   "repository": "https://github.com/cemoozdemir/SecureHive.git",
   "author": "cemoozdemir <ozdemircem2000@gmail.com>",
   "license": "MIT",
   "private": true,
-  "workspaces": ["apps/*", "shared"]
+  "workspaces": ["apps/*", "shared/*"]
 }
