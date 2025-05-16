@@ -4,10 +4,17 @@ import { io, Socket } from "socket.io-client";
 
 let socket: Socket;
 
+interface ChatMessage {
+  text: string;
+  sender: string;
+  timestamp: string;
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const [connected, setConnected] = useState(false);
-  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [chat, setChat] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
     const token = localStorage.getItem("authToken");
@@ -18,19 +25,19 @@ export default function ChatPage() {
     }
 
     socket = io("http://localhost:3100", {
-      auth: {
-        token: token,
-      },
+      auth: { token },
     });
 
     socket.on("connect", () => {
       setConnected(true);
-      console.log("Connected to socket:", socket.id);
     });
 
-    socket.on("connect_error", (err) => {
-      console.error("Socket connection error:", err);
-      setError("Socket connection failed.");
+    socket.on("message", (msg: ChatMessage) => {
+      setChat((prev) => [...prev, msg]);
+    });
+
+    socket.on("connect_error", () => {
+      setConnected(false);
     });
 
     return () => {
@@ -38,16 +45,53 @@ export default function ChatPage() {
     };
   }, []);
 
+  const sendMessage = () => {
+    if (!message.trim()) return;
+    socket.emit("message", { text: message });
+    setChat((prev) => [
+      ...prev,
+      {
+        text: message,
+        sender: "You",
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+    setMessage("");
+  };
+
   return (
-    <div style={{ maxWidth: 400, margin: "auto", padding: "2rem" }}>
-      <h1>Chat Page</h1>
-      {connected ? (
-        <p style={{ color: "green" }}>✅ Connected to server</p>
-      ) : error ? (
-        <p style={{ color: "red" }}>{error}</p>
-      ) : (
-        <p>Connecting...</p>
-      )}
+    <div style={{ maxWidth: 600, margin: "auto", padding: "2rem" }}>
+      <h1>SecureHive Chat</h1>
+      <div
+        style={{
+          border: "1px solid #ccc",
+          padding: "1rem",
+          height: "300px",
+          overflowY: "auto",
+          marginBottom: "1rem",
+        }}
+      >
+        {chat.map((msg, idx) => (
+          <div key={idx} style={{ marginBottom: "0.5rem" }}>
+            <strong>{msg.sender}: </strong>
+            <span>{msg.text}</span>
+          </div>
+        ))}
+      </div>
+      <input
+        type="text"
+        placeholder="Type a message..."
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        style={{ width: "100%", padding: "8px" }}
+      />
+      <button
+        onClick={sendMessage}
+        style={{ width: "100%", marginTop: "0.5rem" }}
+        disabled={!connected}
+      >
+        Send
+      </button>
     </div>
   );
 }
