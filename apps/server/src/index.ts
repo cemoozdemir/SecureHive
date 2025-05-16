@@ -4,6 +4,7 @@ import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 import { pool } from "./db";
+import { configureSocket } from "./socket";
 
 dotenv.config();
 
@@ -29,6 +30,8 @@ io.on("connection", (socket) => {
     console.log("Client disconnected:", socket.id);
   });
 });
+
+configureSocket(io);
 
 (async () => {
   try {
