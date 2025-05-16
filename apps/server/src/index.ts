@@ -3,6 +3,7 @@ import http from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
+import { pool } from "./db";
 
 dotenv.config();
 
@@ -28,6 +29,19 @@ io.on("connection", (socket) => {
     console.log("Client disconnected:", socket.id);
   });
 });
+
+(async () => {
+  try {
+    await pool.query("SELECT NOW()");
+    console.log("Database connection successful");
+  } catch (err) {
+    console.error("Database connection failed", err);
+  }
+})();
+
+import authRoutes from "./routes/auth";
+
+app.use("/auth", authRoutes);
 
 const PORT = process.env.PORT || 3100;
 server.listen(PORT, () => {
