@@ -34,6 +34,18 @@ export function configureSocket(io: Server) {
     const user = socket.data.user as User;
     console.log(`✅ ${user.email} connected with socket ID: ${socket.id}`);
 
+    // Mesaj al
+    socket.on("message", (data: { text: string }) => {
+      const message = {
+        text: data.text,
+        sender: user.email,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Yayınla (diğer kullanıcılara)
+      socket.broadcast.emit("message", message);
+    });
+
     socket.on("disconnect", () => {
       console.log(`❌ ${user.email} disconnected`);
     });
