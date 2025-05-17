@@ -1,3 +1,4 @@
+// apps/server/src/index.ts
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -7,6 +8,7 @@ import { pool } from "./db";
 import { configureSocket } from "./socket";
 import authRoutes from "./routes/auth";
 import { usersRouter } from "./routes/users";
+import messageRoutes from "./routes/messages";
 
 dotenv.config();
 
@@ -23,6 +25,7 @@ app.use(express.json());
 
 app.use("/auth", authRoutes);
 app.use("/users", usersRouter);
+app.use("/messages", messageRoutes);
 
 app.get("/health", (_, res) => {
   res.json({ status: "ok" });

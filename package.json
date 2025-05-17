@@ -12,5 +12,8 @@
   ],
   "dependencies": {
     "libsodium-wrappers": "^0.7.15"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
   }
 }

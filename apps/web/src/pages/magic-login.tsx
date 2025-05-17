@@ -34,7 +34,7 @@ export default function MagicLoginPage() {
 
         // 1 saniye sonra anasayfaya yönlendir
         setTimeout(() => {
-          router.push("/");
+          router.push("/chat");
         }, 1000);
       } catch (err) {
         setStatus("Error during verification.");
