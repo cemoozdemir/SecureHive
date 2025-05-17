@@ -10,7 +10,8 @@ export default function MagicLoginPage() {
     const token = router.query.token;
 
     if (!token || typeof token !== "string") {
-      setStatus("Invalid or missing token.");
+      setStatus("❌ Invalid or missing token.");
+      setError("The magic link is either broken or expired.");
       return;
     }
 
@@ -22,23 +23,19 @@ export default function MagicLoginPage() {
         const data = await res.json();
 
         if (!res.ok) {
-          setStatus("Verification failed.");
+          setStatus("❌ Verification failed.");
           setError(data.error || "Unknown error");
           return;
         }
 
-        // Token’ı localStorage’a kaydet
         localStorage.setItem("authToken", data.token);
-        console.log(localStorage.getItem("authToken"));
-        setStatus("Login successful!");
-
-        // 1 saniye sonra anasayfaya yönlendir
+        setStatus("✅ Login successful! Redirecting...");
         setTimeout(() => {
           router.push("/chat");
-        }, 1000);
+        }, 1500);
       } catch (err) {
-        setStatus("Error during verification.");
-        setError("Unexpected error.");
+        setStatus("❌ Error during verification.");
+        setError("Unexpected error. Please try again.");
       }
     };
 
@@ -46,9 +43,20 @@ export default function MagicLoginPage() {
   }, [router.query.token]);
 
   return (
-    <div style={{ maxWidth: 400, margin: "auto", padding: "2rem" }}>
-      <h1>{status}</h1>
-      {error && <p style={{ color: "red" }}>{error}</p>}
+    <div className="min-h-screen flex items-center justify-center bg-black text-white px-4">
+      <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl w-full max-w-md text-center shadow-lg">
+        <h1 className="text-2xl font-bold mb-4">Magic Link Login</h1>
+
+        <div className="text-lg font-medium mb-2">{status}</div>
+
+        {error && <div className="text-sm text-red-400 mt-2">{error}</div>}
+
+        {!error && status === "Verifying..." && (
+          <div className="mt-4 text-sm text-zinc-400 animate-pulse">
+            Please wait while we verify your token...
+          </div>
+        )}
+      </div>
     </div>
   );
 }

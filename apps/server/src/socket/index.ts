@@ -41,6 +41,7 @@ export function configureSocket(io: Server) {
           iv: data.iv,
           sender: user.email,
           timestamp: new Date().toISOString(),
+          expiryTimestamp: data.expiryTimestamp,
         });
         console.log(`✅ Message sent from ${user.email} to ${data.to}`);
       } else {

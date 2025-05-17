@@ -33,30 +33,48 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ maxWidth: 400, margin: "auto", padding: "2rem" }}>
-      <h1>Login</h1>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="email"
-          placeholder="Enter your email"
-          value={email}
-          required
-          onChange={(e) => setEmail(e.target.value)}
-          style={{ width: "100%", padding: "8px", marginBottom: "1rem" }}
-        />
-        <button type="submit" disabled={loading} style={{ width: "100%" }}>
-          {loading ? "Sending..." : "Send Magic Link"}
-        </button>
-      </form>
+    <div className="min-h-screen bg-black text-white flex items-center justify-center px-4">
+      <div className="w-full max-w-md space-y-6 bg-zinc-900 border border-zinc-800 rounded-xl shadow-lg p-6">
+        <h1 className="text-2xl font-bold text-center">
+          Welcome to SecureHive
+        </h1>
+        <p className="text-sm text-zinc-400 text-center">
+          Enter your email to receive a magic login link.
+        </p>
 
-      {magicLink && (
-        <div style={{ marginTop: "1rem" }}>
-          <p>Magic link (simulated):</p>
-          <a href={magicLink}>{magicLink}</a>
-        </div>
-      )}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            required
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 rounded text-white placeholder-zinc-500"
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className={`w-full py-2 rounded font-semibold transition ${
+              loading
+                ? "bg-zinc-600 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700"
+            }`}
+          >
+            {loading ? "Sending..." : "Send Magic Link"}
+          </button>
+        </form>
 
-      {error && <p style={{ color: "red", marginTop: "1rem" }}>{error}</p>}
+        {magicLink && (
+          <div className="bg-green-800 text-green-100 p-3 rounded text-sm break-words">
+            ✅ Magic link (simulated):{" "}
+            <a href={magicLink} className="underline break-all">
+              {magicLink}
+            </a>
+          </div>
+        )}
+
+        {error && <p className="text-red-400 text-sm text-center">{error}</p>}
+      </div>
     </div>
   );
 }
