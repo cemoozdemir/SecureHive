@@ -64,5 +64,29 @@ router.get("/verify", async (req, res) => {
     res.status(401).json({ error: "Invalid or expired token." });
   }
 });
+router.post("/update-public-key", async (req, res) => {
+  const auth = req.headers.authorization;
+  const token = auth?.split(" ")[1];
+
+  if (!token) {
+    res.status(401).json({ error: "No token provided" });
+    return;
+  }
+
+  try {
+    const decoded = verifyToken(token) as { userId: string };
+    const { publicKey } = req.body;
+
+    await pool.query("UPDATE users SET public_key = $1 WHERE id = $2", [
+      publicKey,
+      decoded.userId,
+    ]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Error updating public key:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 export default router;

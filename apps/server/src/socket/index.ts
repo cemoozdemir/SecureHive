@@ -3,24 +3,20 @@ import { verifyToken } from "../utils/jwt";
 import { pool } from "../db";
 import { User } from "../types";
 
-export function configureSocket(io: Server) {
-  io.use(async (socket: Socket, next) => {
-    const token = socket.handshake.auth.token;
+const onlineUsers = new Map<string, Socket>();
 
-    if (!token) {
-      return next(new Error("Authentication token missing."));
-    }
+export function configureSocket(io: Server) {
+  io.use(async (socket, next) => {
+    const token = socket.handshake.auth.token;
+    if (!token) return next(new Error("Authentication token missing."));
 
     try {
       const decoded = verifyToken(token) as { userId: string };
       const result = await pool.query("SELECT * FROM users WHERE id = $1", [
         decoded.userId,
       ]);
-      const user: User | undefined = result.rows[0];
-
-      if (!user) {
-        return next(new Error("User not found."));
-      }
+      const user: User = result.rows[0];
+      if (!user) return next(new Error("User not found."));
 
       socket.data.user = user;
       next();
@@ -31,23 +27,29 @@ export function configureSocket(io: Server) {
   });
 
   io.on("connection", (socket) => {
-    const user = socket.data.user as User;
-    console.log(`✅ ${user.email} connected with socket ID: ${socket.id}`);
+    const user = socket.data.user;
 
-    // Mesaj al
-    socket.on("message", (data: { text: string }) => {
-      const message = {
-        text: data.text,
-        sender: user.email,
-        timestamp: new Date().toISOString(),
-      };
+    onlineUsers.set(user.email, socket);
+    console.log("🧠 Online users:", Array.from(onlineUsers.keys()));
 
-      // Yayınla (diğer kullanıcılara)
-      socket.broadcast.emit("message", message);
+    socket.on("sendPrivateMessage", (data) => {
+      const recipientSocket = onlineUsers.get(data.to); // email bazlı eşleştirme
+
+      if (recipientSocket) {
+        recipientSocket.emit("message", {
+          ciphertext: data.ciphertext,
+          iv: data.iv,
+          sender: user.email,
+          timestamp: new Date().toISOString(),
+        });
+        console.log(`✅ Message sent from ${user.email} to ${data.to}`);
+      } else {
+        console.warn(`❌ Recipient ${data.to} not online`);
+      }
     });
 
     socket.on("disconnect", () => {
-      console.log(`❌ ${user.email} disconnected`);
+      onlineUsers.delete(user.email); // ☠️ Kullanıcı çıkınca listeden sil
     });
   });
 }

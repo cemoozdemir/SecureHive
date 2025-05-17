@@ -1,0 +1,575 @@
+diff --git a/apps/server/src/index.ts b/apps/server/src/index.ts
+index 58bdd32..3edac1a 100644
+--- a/apps/server/src/index.ts
++++ b/apps/server/src/index.ts
+@@ -5,6 +5,8 @@ import cors from "cors";
+ import dotenv from "dotenv";
+ import { pool } from "./db";
+ import { configureSocket } from "./socket";
++import authRoutes from "./routes/auth";
++import { usersRouter } from "./routes/users";
+ 
+ dotenv.config();
+ 
+@@ -19,6 +21,9 @@ const io = new Server(server, {
+ app.use(cors());
+ app.use(express.json());
+ 
++app.use("/auth", authRoutes);
++app.use("/users", usersRouter);
++
+ app.get("/health", (_, res) => {
+   res.json({ status: "ok" });
+ });
+@@ -42,10 +47,6 @@ configureSocket(io);
+   }
+ })();
+ 
+-import authRoutes from "./routes/auth";
+-
+-app.use("/auth", authRoutes);
+-
+ const PORT = process.env.PORT || 3100;
+ server.listen(PORT, () => {
+   console.log(`Server is running on port ${PORT}`);
+diff --git a/apps/server/src/routes/auth.ts b/apps/server/src/routes/auth.ts
+index 2c0922e..7ff7f37 100644
+--- a/apps/server/src/routes/auth.ts
++++ b/apps/server/src/routes/auth.ts
+@@ -64,5 +64,29 @@ router.get("/verify", async (req, res) => {
+     res.status(401).json({ error: "Invalid or expired token." });
+   }
+ });
++router.post("/update-public-key", async (req, res) => {
++  const auth = req.headers.authorization;
++  const token = auth?.split(" ")[1];
++
++  if (!token) {
++    res.status(401).json({ error: "No token provided" });
++    return;
++  }
++
++  try {
++    const decoded = verifyToken(token) as { userId: string };
++    const { publicKey } = req.body;
++
++    await pool.query("UPDATE users SET public_key = $1 WHERE id = $2", [
++      publicKey,
++      decoded.userId,
++    ]);
++
++    res.json({ success: true });
++  } catch (err) {
++    console.error("Error updating public key:", err);
++    res.status(500).json({ error: "Internal server error" });
++  }
++});
+ 
+ export default router;
+diff --git a/apps/server/src/socket/index.ts b/apps/server/src/socket/index.ts
+index 74a56ec..011b61c 100644
+--- a/apps/server/src/socket/index.ts
++++ b/apps/server/src/socket/index.ts
+@@ -3,24 +3,20 @@ import { verifyToken } from "../utils/jwt";
+ import { pool } from "../db";
+ import { User } from "../types";
+ 
++const onlineUsers = new Map<string, Socket>();
++
+ export function configureSocket(io: Server) {
+-  io.use(async (socket: Socket, next) => {
++  io.use(async (socket, next) => {
+     const token = socket.handshake.auth.token;
+-
+-    if (!token) {
+-      return next(new Error("Authentication token missing."));
+-    }
++    if (!token) return next(new Error("Authentication token missing."));
+ 
+     try {
+       const decoded = verifyToken(token) as { userId: string };
+       const result = await pool.query("SELECT * FROM users WHERE id = $1", [
+         decoded.userId,
+       ]);
+-      const user: User | undefined = result.rows[0];
+-
+-      if (!user) {
+-        return next(new Error("User not found."));
+-      }
++      const user: User = result.rows[0];
++      if (!user) return next(new Error("User not found."));
+ 
+       socket.data.user = user;
+       next();
+@@ -31,23 +27,29 @@ export function configureSocket(io: Server) {
+   });
+ 
+   io.on("connection", (socket) => {
+-    const user = socket.data.user as User;
+-    console.log(`✅ ${user.email} connected with socket ID: ${socket.id}`);
+-
+-    // Mesaj al
+-    socket.on("message", (data: { text: string }) => {
+-      const message = {
+-        text: data.text,
+-        sender: user.email,
+-        timestamp: new Date().toISOString(),
+-      };
+-
+-      // Yayınla (diğer kullanıcılara)
+-      socket.broadcast.emit("message", message);
++    const user = socket.data.user;
++
++    onlineUsers.set(user.email, socket);
++    console.log("🧠 Online users:", Array.from(onlineUsers.keys()));
++
++    socket.on("sendPrivateMessage", (data) => {
++      const recipientSocket = onlineUsers.get(data.to); // email bazlı eşleştirme
++
++      if (recipientSocket) {
++        recipientSocket.emit("message", {
++          ciphertext: data.ciphertext,
++          iv: data.iv,
++          sender: user.email,
++          timestamp: new Date().toISOString(),
++        });
++        console.log(`✅ Message sent from ${user.email} to ${data.to}`);
++      } else {
++        console.warn(`❌ Recipient ${data.to} not online`);
++      }
+     });
+ 
+     socket.on("disconnect", () => {
+-      console.log(`❌ ${user.email} disconnected`);
++      onlineUsers.delete(user.email); // ☠️ Kullanıcı çıkınca listeden sil
+     });
+   });
+ }
+diff --git a/apps/web/next.config.ts b/apps/web/next.config.ts
+index 3915163..84881c6 100644
+--- a/apps/web/next.config.ts
++++ b/apps/web/next.config.ts
+@@ -1,8 +1,16 @@
++import path from "path";
+ import type { NextConfig } from "next";
+ 
+ const nextConfig: NextConfig = {
+-  /* config options here */
+   reactStrictMode: true,
++  transpilePackages: ["shared"],
++  webpack: (config) => {
++    config.resolve.alias = {
++      ...(config.resolve.alias || {}),
++      "@": path.resolve(__dirname, "src"),
++    };
++    return config;
++  },
+ };
+ 
+ export default nextConfig;
+diff --git a/apps/web/package.json b/apps/web/package.json
+index c899afe..fe0887f 100644
+--- a/apps/web/package.json
++++ b/apps/web/package.json
+@@ -9,6 +9,7 @@
+     "lint": "next lint"
+   },
+   "dependencies": {
++    "libsodium-wrappers": "^0.7.15",
+     "next": "15.3.2",
+     "react": "^19.0.0",
+     "react-dom": "^19.0.0",
+@@ -17,6 +18,7 @@
+   "devDependencies": {
+     "@eslint/eslintrc": "^3",
+     "@tailwindcss/postcss": "^4",
++    "@types/libsodium-wrappers": "^0.7.14",
+     "@types/node": "^20",
+     "@types/react": "^19",
+     "@types/react-dom": "^19",
+diff --git a/apps/web/src/pages/chat.tsx b/apps/web/src/pages/chat.tsx
+index 685092c..a9db609 100644
+--- a/apps/web/src/pages/chat.tsx
++++ b/apps/web/src/pages/chat.tsx
+@@ -1,8 +1,24 @@
+-import { useEffect, useState } from "react";
++import { useRef, useEffect, useState } from "react";
+ import { useRouter } from "next/router";
+ import { io, Socket } from "socket.io-client";
++import sodium from "libsodium-wrappers";
+ 
+-let socket: Socket;
++interface ServerToClientEvents {
++  message: (data: {
++    ciphertext: number[];
++    iv: number[];
++    sender: string;
++    timestamp: string;
++  }) => void;
++}
++
++interface ClientToServerEvents {
++  sendPrivateMessage: (data: {
++    to: string;
++    ciphertext: number[];
++    iv: number[];
++  }) => void;
++}
+ 
+ interface ChatMessage {
+   text: string;
+@@ -12,50 +28,155 @@ interface ChatMessage {
+ 
+ export default function ChatPage() {
+   const router = useRouter();
++  const socketRef = useRef<Socket<
++    ServerToClientEvents,
++    ClientToServerEvents
++  > | null>(null);
+   const [connected, setConnected] = useState(false);
+   const [message, setMessage] = useState("");
+   const [chat, setChat] = useState<ChatMessage[]>([]);
++  const [keyPair, setKeyPair] = useState<sodium.KeyPair | null>(null);
++  const [recipient, setRecipient] = useState("");
+ 
++  // 🔐 1. KEY SETUP (ilk useEffect)
+   useEffect(() => {
+-    const token = localStorage.getItem("authToken");
++    const setupKeyPair = async () => {
++      await sodium.ready;
++      const kp = sodium.crypto_kx_keypair();
++      setKeyPair(kp);
++
++      const publicKey = sodium.to_base64(
++        kp.publicKey,
++        sodium.base64_variants.ORIGINAL
++      );
++      const token = localStorage.getItem("authToken");
++
++      await fetch("http://localhost:3100/auth/update-public-key", {
++        method: "POST",
++        headers: {
++          "Content-Type": "application/json",
++          Authorization: `Bearer ${token}`,
++        },
++        body: JSON.stringify({ publicKey }),
++      });
++
++      console.log("✅ Public key uploaded to server.");
++    };
+ 
++    setupKeyPair();
++  }, []);
++
++  // 🔐 2. SOCKET SETUP (ikinci useEffect)
++  useEffect(() => {
++    if (!keyPair) return;
++    const token = localStorage.getItem("authToken");
+     if (!token) {
+       router.push("/login");
+       return;
+     }
+ 
+-    socket = io("http://localhost:3100", {
++    const socket = io("http://localhost:3100", {
+       auth: { token },
+     });
+ 
++    socketRef.current = socket;
++
+     socket.on("connect", () => {
++      console.log("🔌 Connected:", socket.id);
+       setConnected(true);
+     });
+ 
+-    socket.on("message", (msg: ChatMessage) => {
+-      setChat((prev) => [...prev, msg]);
++    socket.on("message", async (msg) => {
++      console.log("📥 [message received]", msg);
++      if (!keyPair) return;
++
++      try {
++        const res = await fetch(
++          `http://localhost:3100/users/${msg.sender}/public-key`
++        );
++        const data = await res.json();
++
++        const senderPublicKey = sodium.from_base64(
++          data.publicKey,
++          sodium.base64_variants.ORIGINAL
++        );
++
++        const sessionKeys = sodium.crypto_kx_server_session_keys(
++          keyPair.publicKey,
++          keyPair.privateKey,
++          senderPublicKey
++        );
++        const sharedKey = sessionKeys.sharedRx;
++
++        const decrypted = sodium.crypto_secretbox_open_easy(
++          new Uint8Array(msg.ciphertext),
++          new Uint8Array(msg.iv),
++          sharedKey
++        );
++        const text = sodium.to_string(decrypted);
++
++        setChat((prev) => [
++          ...prev,
++          { text, sender: msg.sender, timestamp: msg.timestamp },
++        ]);
++      } catch (err) {
++        console.error("🔐 Decryption failed", err);
++      }
+     });
+ 
+-    socket.on("connect_error", () => {
++    socket.on("connect_error", (err) => {
++      console.warn("🚫 Connection failed", err);
+       setConnected(false);
+     });
+ 
+     return () => {
+       socket.disconnect();
++      console.log("🧹 Disconnected socket:", socket.id);
+     };
+-  }, []);
++  }, [keyPair]);
++
++  const sendMessage = async () => {
++    if (!message.trim() || !keyPair || !recipient) return;
++
++    const res = await fetch(
++      `http://localhost:3100/users/${recipient}/public-key`
++    );
++    const data = await res.json();
++
++    const recipientPublicKey = sodium.from_base64(
++      data.publicKey,
++      sodium.base64_variants.ORIGINAL
++    );
++
++    const sessionKeys = sodium.crypto_kx_client_session_keys(
++      keyPair.publicKey,
++      keyPair.privateKey,
++      recipientPublicKey
++    );
++    const sharedKey = sessionKeys.sharedTx;
++
++    const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
++    const ciphertext = sodium.crypto_secretbox_easy(
++      sodium.from_string(message),
++      nonce,
++      sharedKey
++    );
++
++    socketRef.current?.emit("sendPrivateMessage", {
++      to: recipient,
++      ciphertext: Array.from(ciphertext),
++      iv: Array.from(nonce),
++    });
+ 
+-  const sendMessage = () => {
+-    if (!message.trim()) return;
+-    socket.emit("message", { text: message });
+     setChat((prev) => [
+       ...prev,
+       {
+         text: message,
+-        sender: "You",
++        sender: `You → ${recipient}`,
+         timestamp: new Date().toISOString(),
+       },
+     ]);
++
+     setMessage("");
+   };
+ 
+@@ -78,6 +199,13 @@ export default function ChatPage() {
+           </div>
+         ))}
+       </div>
++      <input
++        type="email"
++        placeholder="Send to (email)"
++        value={recipient}
++        onChange={(e) => setRecipient(e.target.value)}
++        style={{ width: "100%", marginBottom: "0.5rem", padding: "8px" }}
++      />
+       <input
+         type="text"
+         placeholder="Type a message..."
+diff --git a/apps/web/tsconfig.json b/apps/web/tsconfig.json
+index 572b7ad..420fb26 100644
+--- a/apps/web/tsconfig.json
++++ b/apps/web/tsconfig.json
+@@ -13,6 +13,7 @@
+     "isolatedModules": true,
+     "jsx": "preserve",
+     "incremental": true,
++    "baseUrl": ".",
+     "paths": {
+       "@/*": ["./src/*"]
+     }
+diff --git a/package.json b/package.json
+index 894e786..4f95a85 100644
+--- a/package.json
++++ b/package.json
+@@ -6,5 +6,11 @@
+   "author": "cemoozdemir <ozdemircem2000@gmail.com>",
+   "license": "MIT",
+   "private": true,
+-  "workspaces": ["apps/*", "shared/*"]
++  "workspaces": [
++    "apps/*",
++    "shared/*"
++  ],
++  "dependencies": {
++    "libsodium-wrappers": "^0.7.15"
++  }
+ }
+diff --git a/shared/crypto/aes.ts b/shared/crypto/aes.ts
+deleted file mode 100644
+index b4ab38a..0000000
+--- a/shared/crypto/aes.ts
++++ /dev/null
+@@ -1,35 +0,0 @@
+-export async function encryptMessage(
+-  message: string,
+-  key: CryptoKey
+-): Promise<{ ciphertext: ArrayBuffer; iv: Uint8Array }> {
+-  const enc = new TextEncoder();
+-  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+-
+-  const ciphertext = await window.crypto.subtle.encrypt(
+-    {
+-      name: "AES-GCM",
+-      iv,
+-    },
+-    key,
+-    enc.encode(message)
+-  );
+-
+-  return { ciphertext, iv };
+-}
+-
+-export async function decryptMessage(
+-  ciphertext: ArrayBuffer,
+-  iv: Uint8Array,
+-  key: CryptoKey
+-): Promise<string> {
+-  const decrypted = await window.crypto.subtle.decrypt(
+-    {
+-      name: "AES-GCM",
+-      iv,
+-    },
+-    key,
+-    ciphertext
+-  );
+-
+-  return new TextDecoder().decode(decrypted);
+-}
+diff --git a/shared/crypto/index.ts b/shared/crypto/index.ts
+deleted file mode 100644
+index 4a12b8c..0000000
+--- a/shared/crypto/index.ts
++++ /dev/null
+@@ -1,2 +0,0 @@
+-export * from "./keys";
+-export * from "./aes";
+diff --git a/shared/crypto/keys.ts b/shared/crypto/keys.ts
+deleted file mode 100644
+index d66d3c3..0000000
+--- a/shared/crypto/keys.ts
++++ /dev/null
+@@ -1,29 +0,0 @@
+-export async function generateKeyPair(): Promise<CryptoKeyPair> {
+-  return await window.crypto.subtle.generateKey(
+-    {
+-      name: "ECDH",
+-      namedCurve: "X25519",
+-    },
+-    true,
+-    ["deriveKey"]
+-  );
+-}
+-
+-export async function deriveSharedKey(
+-  privateKey: CryptoKey,
+-  publicKey: CryptoKey
+-): Promise<CryptoKey> {
+-  return await window.crypto.subtle.deriveKey(
+-    {
+-      name: "ECDH",
+-      public: publicKey,
+-    },
+-    privateKey,
+-    {
+-      name: "AES-GCM",
+-      length: 256,
+-    },
+-    false,
+-    ["encrypt", "decrypt"]
+-  );
+-}
+diff --git a/yarn.lock b/yarn.lock
+index 5177524..b3f783a 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -641,6 +641,11 @@
+     "@types/ms" "*"
+     "@types/node" "*"
+ 
++"@types/libsodium-wrappers@^0.7.14":
++  version "0.7.14"
++  resolved "https://registry.yarnpkg.com/@types/libsodium-wrappers/-/libsodium-wrappers-0.7.14.tgz#f688f8d44e46ed61c401f82ff757581655fbcc42"
++  integrity sha512-5Kv68fXuXK0iDuUir1WPGw2R9fOZUlYlSAa0ztMcL0s0BfIDTqg9GXz8K30VJpPP3sxWhbolnQma2x+/TfkzDQ==
++
+ "@types/mime@^1":
+   version "1.3.5"
+   resolved "https://registry.npmjs.org/@types/mime/-/mime-1.3.5.tgz"
+@@ -1448,7 +1453,7 @@ encodeurl@^2.0.0:
+ 
+ engine.io-client@~6.6.1:
+   version "6.6.3"
+-  resolved "https://registry.yarnpkg.com/engine.io-client/-/engine.io-client-6.6.3.tgz#815393fa24f30b8e6afa8f77ccca2f28146be6de"
++  resolved "https://registry.npmjs.org/engine.io-client/-/engine.io-client-6.6.3.tgz"
+   integrity sha512-T0iLjnyNWahNyv/lcjS2y4oE358tVS/SYQNxYXGAJ9/GLgH4VCvOQ/mhTjqU88mLZCQgiG8RIegFHYCdVC+j5w==
+   dependencies:
+     "@socket.io/component-emitter" "~3.1.0"
+@@ -2568,6 +2573,18 @@ levn@^0.4.1:
+     prelude-ls "^1.2.1"
+     type-check "~0.4.0"
+ 
++libsodium-wrappers@^0.7.15:
++  version "0.7.15"
++  resolved "https://registry.yarnpkg.com/libsodium-wrappers/-/libsodium-wrappers-0.7.15.tgz#53f13e483820272a3d55b23be2e34402ac988055"
++  integrity sha512-E4anqJQwcfiC6+Yrl01C1m8p99wEhLmJSs0VQqST66SbQXXBoaJY0pF4BNjRYa/sOQAxx6lXAaAFIlx+15tXJQ==
++  dependencies:
++    libsodium "^0.7.15"
++
++libsodium@^0.7.15:
++  version "0.7.15"
++  resolved "https://registry.npmjs.org/libsodium/-/libsodium-0.7.15.tgz"
++  integrity sha512-sZwRknt/tUpE2AwzHq3jEyUU5uvIZHtSssktXq7owd++3CSgn8RGrv6UZJJBpP7+iBghBqe7Z06/2M31rI2NKw==
++
+ lightningcss-darwin-arm64@1.30.1:
+   version "1.30.1"
+   resolved "https://registry.npmjs.org/lightningcss-darwin-arm64/-/lightningcss-darwin-arm64-1.30.1.tgz"
+@@ -3553,7 +3570,7 @@ socket.io-adapter@~2.5.2:
+ 
+ socket.io-client@^4.8.1:
+   version "4.8.1"
+-  resolved "https://registry.yarnpkg.com/socket.io-client/-/socket.io-client-4.8.1.tgz#1941eca135a5490b94281d0323fe2a35f6f291cb"
++  resolved "https://registry.npmjs.org/socket.io-client/-/socket.io-client-4.8.1.tgz"
+   integrity sha512-hJVXfu3E28NmzGk8o1sHhN3om52tRvwYeidbj7xKy2eIIse5IoKX3USlS6Tqt3BHAtflLIkCQBkzVrEEfWUyYQ==
+   dependencies:
+     "@socket.io/component-emitter" "~3.1.0"
+@@ -4044,7 +4061,7 @@ ws@~8.17.1:
+ 
+ xmlhttprequest-ssl@~2.1.1:
+   version "2.1.2"
+-  resolved "https://registry.yarnpkg.com/xmlhttprequest-ssl/-/xmlhttprequest-ssl-2.1.2.tgz#e9e8023b3f29ef34b97a859f584c5e6c61418e23"
++  resolved "https://registry.npmjs.org/xmlhttprequest-ssl/-/xmlhttprequest-ssl-2.1.2.tgz"
+   integrity sha512-TEU+nJVUUnA4CYJFLvK5X9AOeH4KvDvhIfm0vV1GaQRtchnG0hgK5p8hw/xjv8cunWYCsiPCSDzObPyhEwq3KQ==
+ 
+ xtend@^4.0.0:

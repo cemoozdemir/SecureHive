@@ -6,5 +6,11 @@
   "author": "cemoozdemir <ozdemircem2000@gmail.com>",
   "license": "MIT",
   "private": true,
-  "workspaces": ["apps/*", "shared/*"]
+  "workspaces": [
+    "apps/*",
+    "shared/*"
+  ],
+  "dependencies": {
+    "libsodium-wrappers": "^0.7.15"
+  }
 }
